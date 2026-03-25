@@ -26,79 +26,49 @@ $stmt = $pdo->prepare("SELECT * FROM utilisateurs WHERE id = ?");
 $stmt->execute([$user_id]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
+// Gérer la photo de profil
+$photo_profil = $user['photo_profil'] ?? 'default.jpg';
+$photo_path = !empty($user['photo_profil']) ? 'uploads/profils/' . $user['photo_profil'] : 'https://ui-avatars.com/api/?name=' . urlencode($user['nom_complet']) . '&background=007bff&color=fff&size=150';
+
 // Traitement de la modification du profil
 $message = '';
 $message_class = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_profil'])) {
-    $nom_complet = trim($_POST['nom_complet']);
-    $email = trim($_POST['email']);
-    $password = $_POST['password'];
-    $confirm_password = $_POST['confirm_password'];
-    
-    $errors = [];
-    
-    // Validation
-    if (empty($nom_complet)) {
-        $errors[] = "Le nom complet est requis.";
-    }
-    
-    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = "Adresse email invalide.";
-    }
-    
-    // Vérifier si l'email existe déjà (sauf pour l'utilisateur actuel)
-    if (!empty($email)) {
-        $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ? AND id != ?");
-        $stmt->execute([$email, $user_id]);
-        if ($stmt->rowCount() > 0) {
-            $errors[] = "Cet email est déjà utilisé par un autre compte.";
-        }
-    }
-    
-    // Si mot de passe fourni, le valider
-    if (!empty($password)) {
-        if (strlen($password) < 6) {
-            $errors[] = "Le mot de passe doit contenir au moins 6 caractères.";
-        }
-        if ($password !== $confirm_password) {
-            $errors[] = "Les mots de passe ne correspondent pas.";
-        }
-    }
-    
-    if (empty($errors)) {
-        try {
-            // Préparer la requête de mise à jour
-            if (!empty($password)) {
-                // Mettre à jour avec nouveau mot de passe
-                $password_hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("UPDATE utilisateurs SET nom_complet = ?, email = ?, mot_de_passe = ? WHERE id = ?");
-                $stmt->execute([$nom_complet, $email, $password_hash, $user_id]);
-            } else {
-                // Mettre à jour sans changer le mot de passe
-                $stmt = $pdo->prepare("UPDATE utilisateurs SET nom_complet = ?, email = ? WHERE id = ?");
-                $stmt->execute([$nom_complet, $email, $user_id]);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // 1. Changement de photo de profil
+    if (isset($_FILES['photo_profil']) && $_FILES['photo_profil']['error'] === 0) {
+        $file = $_FILES['photo_profil'];
+        $allowed_types = ['image/jpeg', 'image/png', 'image/gif'];
+        
+        if (in_array($file['type'], $allowed_types) && $file['size'] <= 2 * 1024 * 1024) {
+            // Créer dossier uploads si inexistant
+            if (!file_exists('uploads/profils')) {
+                mkdir('uploads/profils', 0777, true);
             }
             
-            // Mettre à jour la session
-            $_SESSION['user_nom'] = $nom_complet;
-            $_SESSION['user_email'] = $email;
+            // Supprimer ancienne photo
+            if (!empty($user['photo_profil']) && file_exists('uploads/profils/' . $user['photo_profil'])) {
+                unlink('uploads/profils/' . $user['photo_profil']);
+            }
             
-            $message = "✅ Profil mis à jour avec succès !";
-            $message_class = "success";
+            // Générer nouveau nom
+            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $new_filename = 'user_' . $user_id . '_' . time() . '.' . $ext;
             
-            // Recharger les données utilisateur
-            $stmt = $pdo->prepare("SELECT * FROM utilisateurs WHERE id = ?");
-            $stmt->execute([$user_id]);
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-        } catch(PDOException $e) {
-            $message = "❌ Erreur lors de la mise à jour : " . $e->getMessage();
-            $message_class = "error";
+            if (move_uploaded_file($file['tmp_name'], 'uploads/profils/' . $new_filename)) {
+                $stmt = $pdo->prepare("UPDATE utilisateurs SET photo_profil = ? WHERE id = ?");
+                $stmt->execute([$new_filename, $user_id]);
+                $user['photo_profil'] = $new_filename;
+                $photo_path = 'uploads/profils/' . $new_filename;
+                $message = "✅ Photo mise à jour !";
+                $message_class = "success";
+            }
         }
-    } else {
-        $message = implode("<br>", $errors);
-        $message_class = "error";
+    }
+    
+    // 2. Modification des informations (votre code existant)
+    elseif (isset($_POST['modifier_profil'])) {
+        // ... votre code existant pour modifier nom/email/password ...
     }
 }
 ?>
@@ -108,241 +78,375 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['modifier_profil'])) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Profil d'utilisateur</title>
+  <title>Mon Profil</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f0f4f8;
-      margin: 0;
+    /* Styles améliorés */
+    .profile-container {
+      max-width: 800px;
+      margin: 0 auto;
       padding: 20px;
     }
-
-    .header {
+    
+    .profile-header {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 30px;
+      margin-bottom: 30px;
+      background: white;
+      padding: 25px;
+      border-radius: 15px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
     }
-
-    .header .back-btn {
-      font-size: 18px;
-      color: #333;
-      cursor: pointer;
+    
+    .profile-avatar {
+      position: relative;
     }
-
-    .header h2 {
-      text-align: center;
-      flex-grow: 1;
-      margin: 0;
-      color: #333;
-    }
-
-    .profile-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-top: 30px;
-    }
-
-    .profile-icon {
-      font-size: 60px;
-      color: #007bff;
-      background-color: #e0f0ff;
+    
+    .profile-img {
+      width: 150px;
+      height: 150px;
       border-radius: 50%;
-      padding: 20px;
+      object-fit: cover;
+      border: 5px solid #007bff;
       cursor: pointer;
+      transition: all 0.3s;
     }
-
-    .user-info {
-      text-align: center;
-      flex: 1;
+    
+    .profile-img:hover {
+      transform: scale(1.05);
+      border-color: #0056b3;
     }
-
-    .user-info p {
-      margin: 5px 0;
-      font-size: 16px;
-    }
-
-    .edit-btn {
-      background-color: #007bff;
+    
+    .change-photo-btn {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      background: #007bff;
       color: white;
-      border: none;
-      padding: 10px 15px;
-      cursor: pointer;
-      border-radius: 5px;
-    }
-
-    .form-container {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
       display: flex;
+      align-items: center;
       justify-content: center;
-      margin-top: 30px;
-      gap: 20px;
-      flex-wrap: wrap;
+      cursor: pointer;
+      border: 3px solid white;
     }
-
-    .form-section {
-      background-color: white;
-      padding: 20px;
-      border-radius: 10px;
-      width: 300px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    
+    .user-details h2 {
+      margin: 0 0 10px 0;
+      color: #333;
     }
-
-    .form-section h3 {
-      margin-top: 0;
+    
+    .user-details p {
+      margin: 5px 0;
+      color: #666;
     }
-
-    .form-section label {
-      display: block;
-      margin-bottom: 5px;
+    
+    .badge {
+      display: inline-block;
+      padding: 5px 15px;
+      background: #28a745;
+      color: white;
+      border-radius: 20px;
+      font-size: 14px;
       margin-top: 10px;
     }
-
-    .form-section input {
-      width: 100%;
-      padding: 8px;
-      margin-bottom: 5px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
+    
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
     }
-
-    .save-btn {
+    
+    .form-card {
+      background: white;
+      padding: 25px;
+      border-radius: 15px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+    }
+    
+    .form-card h3 {
+      margin-top: 0;
+      color: #007bff;
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 10px;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-group label {
       display: block;
-      margin: 30px auto 0;
-      background-color: green;
-      color: white;
-      padding: 12px 25px;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #555;
+    }
+    
+    .form-control {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+    
+    .form-control:focus {
+      border-color: #007bff;
+      outline: none;
+    }
+    
+    .form-control:disabled {
+      background: #f8f9fa;
+      cursor: not-allowed;
+    }
+    
+    .btn {
+      padding: 12px 30px;
       border: none;
-      border-radius: 5px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
       cursor: pointer;
+      transition: all 0.3s;
     }
-
-    .message {
+    
+    .btn-primary {
+      background: linear-gradient(to right, #007bff, #0056b3);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,123,255,0.3);
+    }
+    
+    .btn-success {
+      background: linear-gradient(to right, #28a745, #1e7e34);
+      color: white;
+    }
+    
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    
+    .action-buttons {
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      margin-top: 30px;
+    }
+    
+    .alert {
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
       text-align: center;
-      margin-top: 15px;
-      font-weight: bold;
-      padding: 10px;
-      border-radius: 5px;
-      max-width: 600px;
-      margin-left: auto;
-      margin-right: auto;
     }
-
-    .error {
-      color: red;
-      background-color: #ffe6e6;
-      border: 1px solid red;
+    
+    .alert-success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
     }
-
-    .success {
-      color: green;
-      background-color: #e6ffe6;
-      border: 1px solid green;
+    
+    .alert-error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
     }
-
-    input[disabled] {
-      background-color: #f0f0f0;
+    
+    .info-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .info-label {
+      font-weight: 600;
+      color: #666;
+    }
+    
+    .info-value {
+      color: #333;
     }
   </style>
 </head>
 <body>
 
-  <div class="header">
-    <a href="tableau_de_bord.php" class="back-btn">&larr; Retour</a>
-    <h2>Profil d'utilisateur</h2>
-    <div></div>
-  </div>
-
-  <div class="profile-top">
-    <div class="profile-icon" id="profileIcon"><i class="fas fa-user"></i></div>
-    <div class="user-info">
-      <p><strong><?php echo htmlspecialchars($user['nom_complet']); ?></strong></p>
-      <p><?php echo htmlspecialchars($user['email']); ?></p>
-    </div>
-    <button class="edit-btn" id="editBtn">Modifier</button>
-  </div>
-
-  <?php if ($message): ?>
-  <div class="message <?php echo $message_class; ?>">
-    <?php echo $message; ?>
-  </div>
-  <?php endif; ?>
-
-  <form method="POST" action="">
-    <div class="form-container">
-      <div class="form-section">
-        <h3>Information du profil</h3>
-        <label for="nom_complet">Nom complet</label>
-        <input type="text" id="nom_complet" name="nom_complet" 
-               value="<?php echo htmlspecialchars($user['nom_complet']); ?>" disabled required>
+  <div class="profile-container">
+    <!-- En-tête -->
+    <div class="profile-header">
+      <div class="profile-avatar">
+        <img src="<?php echo $photo_path; ?>" 
+             alt="Photo de profil" 
+             class="profile-img"
+             id="profileImage"
+             onclick="document.getElementById('photoInput').click()">
         
-        <label for="email">Adresse Email</label>
-        <input type="email" id="email" name="email" 
-               value="<?php echo htmlspecialchars($user['email']); ?>" disabled required>
+        <form method="POST" action="" enctype="multipart/form-data" id="photoForm" style="display: none;">
+          <input type="file" id="photoInput" name="photo_profil" accept="image/*" onchange="this.form.submit()">
+        </form>
+        
+        <div class="change-photo-btn" onclick="document.getElementById('photoInput').click()">
+          <i class="fas fa-camera"></i>
+        </div>
       </div>
-
-      <div class="form-section">
-        <h3>Détails du compte</h3>
-        <label for="password">Nouveau mot de passe (laisser vide pour ne pas changer)</label>
-        <input type="password" id="password" name="password" value="" disabled>
-        
-        <label for="confirm_password">Confirmer le nouveau mot de passe</label>
-        <input type="password" id="confirm_password" name="confirm_password" value="" disabled>
+      
+      <div class="user-details">
+        <h2><?php echo htmlspecialchars($user['nom_complet']); ?></h2>
+        <p><i class="fas fa-envelope"></i> <?php echo htmlspecialchars($user['email']); ?></p>
+        <p><i class="fas fa-calendar"></i> Membre depuis : <?php echo date('d/m/Y', strtotime($user['date_inscription'] ?? 'now')); ?></p>
+        <span class="badge">
+          <i class="fas fa-user"></i> Utilisateur
+        </span>
       </div>
     </div>
 
-    <button type="submit" class="save-btn" id="saveBtn" name="modifier_profil" style="display: none;">Enregistrer</button>
-  </form>
+    <!-- Messages -->
+    <?php if ($message): ?>
+    <div class="alert alert-<?php echo $message_class === 'success' ? 'success' : 'error'; ?>">
+      <?php echo $message; ?>
+    </div>
+    <?php endif; ?>
+
+    <!-- Formulaire -->
+    <form method="POST" action="" id="profileForm">
+      <div class="form-grid">
+        <!-- Informations personnelles -->
+        <div class="form-card">
+          <h3><i class="fas fa-user-circle"></i> Informations personnelles</h3>
+          
+          <div class="form-group">
+            <label for="nom_complet">Nom complet</label>
+            <input type="text" id="nom_complet" name="nom_complet" 
+                   class="form-control"
+                   value="<?php echo htmlspecialchars($user['nom_complet']); ?>" 
+                   disabled required>
+          </div>
+          
+          <div class="form-group">
+            <label for="email">Adresse email</label>
+            <input type="email" id="email" name="email" 
+                   class="form-control"
+                   value="<?php echo htmlspecialchars($user['email']); ?>" 
+                   disabled required>
+          </div>
+          
+          <div class="info-item">
+            <span class="info-label">Date d'inscription</span>
+            <span class="info-value"><?php echo date('d/m/Y', strtotime($user['date_inscription'] ?? 'now')); ?></span>
+          </div>
+        </div>
+
+        <!-- Sécurité -->
+        <div class="form-card">
+          <h3><i class="fas fa-shield-alt"></i> Sécurité du compte</h3>
+          
+          <div class="form-group">
+            <label for="password">Nouveau mot de passe</label>
+            <input type="password" id="password" name="password" 
+                   class="form-control"
+                   value="" 
+                   placeholder="Laisser vide pour ne pas changer"
+                   disabled>
+          </div>
+          
+          <div class="form-group">
+            <label for="confirm_password">Confirmer le mot de passe</label>
+            <input type="password" id="confirm_password" name="confirm_password" 
+                   class="form-control"
+                   value="" 
+                   placeholder="Confirmez le nouveau mot de passe"
+                   disabled>
+          </div>
+          
+          <div class="info-item">
+            <span class="info-label">Dernière connexion</span>
+            <span class="info-value">Aujourd'hui</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Boutons d'action -->
+      <div class="action-buttons">
+        <button type="button" class="btn btn-primary" id="editBtn">
+          <i class="fas fa-edit"></i> Modifier le profil
+        </button>
+        
+        <button type="submit" class="btn btn-success" id="saveBtn" name="modifier_profil" style="display: none;">
+          <i class="fas fa-save"></i> Enregistrer les modifications
+        </button>
+        
+        <a href="tableau_de_bord.php" class="btn btn-secondary">
+          <i class="fas fa-arrow-left"></i> Retour au tableau de bord
+        </a>
+      </div>
+    </form>
+  </div>
 
   <script>
     const editBtn = document.getElementById("editBtn");
     const saveBtn = document.getElementById("saveBtn");
-    const inputs = document.querySelectorAll("input");
-    const message = document.querySelector(".message");
-
+    const inputs = document.querySelectorAll("#profileForm .form-control");
+    
     editBtn.addEventListener("click", () => {
       const isDisabled = inputs[0].disabled;
       
-      // Activer/désactiver tous les champs
+      // Activer/désactiver les champs
       inputs.forEach(input => input.disabled = !isDisabled);
       
-      // Changer le texte du bouton
+      // Changer les boutons
       if (isDisabled) {
-        editBtn.textContent = "Annuler";
-        saveBtn.style.display = "block";
-        if (message) message.style.display = "none";
+        editBtn.innerHTML = '<i class="fas fa-times"></i> Annuler';
+        editBtn.className = 'btn btn-secondary';
+        saveBtn.style.display = 'inline-block';
+        // Focus sur le premier champ
+        inputs[0].focus();
       } else {
-        editBtn.textContent = "Modifier";
-        saveBtn.style.display = "none";
-        // Réinitialiser les champs de mot de passe
+        editBtn.innerHTML = '<i class="fas fa-edit"></i> Modifier le profil';
+        editBtn.className = 'btn btn-primary';
+        saveBtn.style.display = 'none';
+        // Réinitialiser les mots de passe
         document.getElementById("password").value = "";
         document.getElementById("confirm_password").value = "";
       }
     });
 
-    // Changement de l'icône de profil
-    document.getElementById("profileIcon").addEventListener("click", () => {
-      alert("Fonction pour changer l'image de profil à ajouter plus tard.");
-    });
-
-    // Validation côté client (identique à votre code)
-    document.querySelector("form").addEventListener("submit", function(e) {
+    // Validation côté client
+    document.getElementById("profileForm").addEventListener("submit", function(e) {
       const password = document.getElementById("password").value.trim();
       const confirmPassword = document.getElementById("confirm_password").value.trim();
       
-      // Si un mot de passe est fourni, le valider
       if (password !== "") {
         if (password.length < 6) {
           e.preventDefault();
-          alert("Le mot de passe doit contenir au moins 6 caractères.");
+          alert("⚠️ Le mot de passe doit contenir au moins 6 caractères.");
           return false;
         }
         
         if (password !== confirmPassword) {
           e.preventDefault();
-          alert("Les mots de passe ne correspondent pas.");
+          alert("⚠️ Les mots de passe ne correspondent pas.");
           return false;
         }
+      }
+    });
+
+    // Prévisualisation de la photo
+    document.getElementById("photoInput")?.addEventListener("change", function(e) {
+      if (this.files && this.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          document.getElementById("profileImage").src = e.target.result;
+        };
+        reader.readAsDataURL(this.files[0]);
       }
     });
   </script>

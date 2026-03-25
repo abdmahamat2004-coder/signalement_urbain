@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = $_SESSION['user_email'];
     $categorie = trim($_POST['categorie']);
     $titre = trim($_POST['titre']);
-    $rue = trim($_POST['rue']);
+    $rue = trim($_POST['rue']); // RUE - MAINTENANT VISIBLE ET OBLIGATOIRE
     $quartier = trim($_POST['quartier']);
     $niveau = trim($_POST['niveau']);
     $description = trim($_POST['description']);
@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $email,
                 $categorie,
                 $titre,
-                $rue,
+                $rue, // RUE - IMPORTANT
                 $quartier,
                 $niveau,
                 $description,
@@ -225,7 +225,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="container">
         <div class="header">
-            <button onclick="history.back()">←</button>
+            
             <h2>Nouveau Signalement</h2>
         </div>
 
@@ -272,10 +272,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <input type="hidden" id="longitude" name="longitude">
             </div>
 
-            <!-- Rue et Quartier (champs requis mais cachés pour l'interface) -->
-            <div style="display: none;">
-                <input type="text" id="rue" name="rue" value="Rue détectée" required>
-                <input type="text" id="quartier" name="quartier" value="Quartier détecté">
+            <!-- Rue et Quartier - MAINTENANT VISIBLES ET OBLIGATOIRES -->
+            <div class="row">
+                <div class="field">
+                    <label for="rue">Rue/Adresse <span style="color: red;">*</span></label>
+                    <input type="text" id="rue" name="rue" placeholder="Ex: Rue de la Paix, Avenue principale" required>
+                </div>
+                <div class="field">
+                    <label for="quartier">Quartier/Secteur (optionnel)</label>
+                    <input type="text" id="quartier" name="quartier" placeholder="Ex: Centre-ville, Quartier Nord">
+                </div>
             </div>
 
             <!-- Gravité -->
@@ -283,9 +289,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="field">
                     <label for="niveau">Gravité</label>
                     <select id="niveau" name="niveau">
-                        <option>Faible</option>
-                        <option>Moyenne</option>
-                        <option>Élevé</option>
+                        <option value="Faible">Faible</option>
+                        <option value="Moyenne">Moyenne</option>
+                        <option value="Élevé">Élevé</option>
                     </select>
                 </div>
             </div>
@@ -326,6 +332,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     const lon = position.coords.longitude;
                     showMap(lat, lon);
                     
+                    // Remplir les champs de localisation
+                    document.getElementById('rue').value = "Position détectée";
+                    document.getElementById('quartier').value = "Localisation GPS";
+                    
                     // Remplir les champs cachés
                     document.getElementById('latitude').value = lat;
                     document.getElementById('longitude').value = lon;
@@ -342,7 +352,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!map) {
                 map = L.map('map').setView([lat, lon], 16);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap'
+                    attribution: '©️ OpenStreetMap'
                 }).addTo(map);
                 marker = L.marker([lat, lon]).addTo(map);
             } else {
@@ -378,11 +388,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Validation
         document.querySelector("form").addEventListener("submit", function(e) {
             const titre = document.getElementById("titre").value.trim();
+            const rue = document.getElementById("rue").value.trim();
             const description = document.getElementById("description").value.trim();
             
-            if (!titre || !description) {
+            if (!titre || !rue || !description) {
                 e.preventDefault();
-                alert("Veuillez remplir le titre et la description.");
+                alert("Veuillez remplir le titre, la rue et la description.");
                 return false;
             }
             

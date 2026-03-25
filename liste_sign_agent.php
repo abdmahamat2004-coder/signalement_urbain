@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Vérifier si l'utilisateur est connecté
-if (!isset($_SESSION['user_id'])) {
+// Vérifier si l'utilisateur est connecté ET est agent
+if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'agent') {
     header('Location: connexion.php');
     exit();
 }
@@ -21,7 +21,7 @@ try {
 }
 
 // Récupérer TOUS les signalements
-$stmt = $pdo->prepare("SELECT s.*, u.nom_complet 
+$stmt = $pdo->prepare("SELECT s.*, u.nom_complet, u.email as user_email 
                        FROM signalements s 
                        LEFT JOIN utilisateurs u ON s.user_id = u.id 
                        ORDER BY s.date_signalement DESC");
@@ -34,14 +34,16 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tous les Signalements</title>
+  <title>Tous les signalements - Agent</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <style>
+    /* MÊME STYLE QUE TON FICHIER UTILISATEUR */
     body { font-family: Arial; margin: 0; background: #f5f7fa; }
     
     .header {
-      background: #007BFF;
+      background: #28A745;
       color: white;
       padding: 15px 20px;
       display: flex;
@@ -70,6 +72,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       text-align: center;
     }
     
+    /* FILTRES ET RECHERCHE */
     .filters {
       background: white;
       padding: 20px;
@@ -96,8 +99,8 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     .search-container input:focus {
       outline: none;
-      border-color: #007BFF;
-      box-shadow: 0 0 0 3px rgba(0,123,255,0.25);
+      border-color: #28A745;
+      box-shadow: 0 0 0 3px rgba(40,167,69,0.25);
     }
     
     .filter-group {
@@ -125,7 +128,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
     .dropdown-btn:hover {
-      border-color: #007BFF;
+      border-color: #28A745;
     }
     
     .dropdown-menu {
@@ -154,7 +157,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     .dropdown-menu div:hover {
       background: #f8f9fa;
-      color: #007BFF;
+      color: #28A745;
     }
     
     table {
@@ -167,7 +170,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
     th {
-      background: #007BFF;
+      background: #28A745;
       color: white;
       padding: 15px;
       text-align: left;
@@ -195,6 +198,20 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       background: #218838;
     }
     
+    .btn-modifier {
+      background: #ffc107;
+      color: #333;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-left: 5px;
+    }
+    
+    .btn-modifier:hover {
+      background: #e0a800;
+    }
+    
     /* MODAL */
     .modal {
       display: none;
@@ -210,11 +227,11 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     .modal-content {
       background: white;
       width: 90%;
-      max-width: 900px;
-      margin: 30px auto;
+      max-width: 800px;
+      margin: 50px auto;
       padding: 20px;
       border-radius: 10px;
-      max-height: 90vh;
+      max-height: 80vh;
       overflow-y: auto;
     }
     
@@ -244,40 +261,15 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
     .detail-item strong {
-      color: #007BFF;
-      display: block;
-      margin-bottom: 5px;
+      color: #28A745;
     }
     
-    .photo-container {
-      display: flex;
-      gap: 20px;
-      margin: 20px 0;
-    }
-    
-    .photo-box {
-      flex: 1;
-      text-align: center;
-      padding: 15px;
-      background: #f8f9fa;
-      border-radius: 5px;
-    }
-    
-    .photo-box h4 {
-      color: #007BFF;
-      margin-bottom: 10px;
-    }
-    
-    .photo-box img {
+    .detail-photo {
       max-width: 100%;
-      max-height: 250px;
+      max-height: 300px;
       border-radius: 5px;
       border: 1px solid #ddd;
-    }
-    
-    .no-photo {
-      padding: 30px;
-      color: #999;
+      margin-top: 10px;
     }
     
     .map-container {
@@ -288,6 +280,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       margin-top: 10px;
     }
     
+    /* STATUT */
     .status {
       display: inline-flex;
       align-items: center;
@@ -328,6 +321,15 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       background: #28a745;
     }
     
+    .assigned-badge {
+      background: #28a745;
+      color: white;
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    
+    /* RESPONSIVE */
     @media (max-width: 768px) {
       .filters {
         flex-direction: column;
@@ -344,36 +346,29 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       .dropdown {
         width: 100%;
       }
-      
-      .photo-container {
-        flex-direction: column;
-      }
     }
   </style>
 </head>
 <body>
 
+  <!-- EN-TÊTE -->
   <div class="header">
     <div>
       
-      <a href="tableau_de_bord.php"><i class="fas fa-home"></i></a>
+      <a href="tableau_de_bord_agent.php"><i class="fas fa-home"></i></a>
     </div>
-    <span style="font-weight: bold;">Tous les Signalements</span>
-    <a href="profil-utilisateur.php"><i class="fas fa-user"></i></a>
+    <span style="font-weight: bold;">Tous les signalements - Agent</span>
+    <a href="tableau_de_bord_agent.php"><i class="fas fa-user"></i></a>
   </div>
 
+  <!-- CONTENU -->
   <div class="container">
     <div class="title">
-      <h1>Tous les Signalements</h1>
+      <h1>Tous les signalements</h1>
       <p>Visualisez tous les signalements de la plateforme</p>
     </div>
 
-    <?php if (isset($_GET['success'])): ?>
-    <div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin-bottom: 20px;">
-      ✅ Signalement créé avec succès !
-    </div>
-    <?php endif; ?>
-
+    <!-- FILTRES ET RECHERCHE -->
     <div class="filters">
       <div class="search-container">
         <input type="text" id="search" placeholder="Rechercher dans les signalements..." onkeyup="filterRows()">
@@ -411,6 +406,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       </div>
     </div>
 
+    <!-- TABLEAU -->
     <table id="signalementTable">
       <thead>
         <tr>
@@ -421,11 +417,13 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
           <th>Catégorie</th>
           <th>Date</th>
           <th>Statut</th>
+          <th>Agent</th>
           <th>Action</th>
         </tr>
       </thead>
       <tbody id="table-body">
         <?php foreach ($signalements as $signalement): 
+          // Déterminer le statut
           $status_class = '';
           $status_text = '';
           
@@ -443,6 +441,9 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
               $status_text = 'Résolu';
               break;
           }
+          
+          // Vérifier si c'est ma mission
+          $is_mine = ($signalement['agent_id'] == $_SESSION['user_id']);
         ?>
         <tr>
           <td>#<?php echo str_pad($signalement['id'], 3, '0', STR_PAD_LEFT); ?></td>
@@ -457,6 +458,15 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </div>
           </td>
           <td>
+            <?php if ($is_mine): ?>
+              <span class="assigned-badge">Ma mission</span>
+            <?php elseif ($signalement['agent_id']): ?>
+              Assigné
+            <?php else: ?>
+              Non assigné
+            <?php endif; ?>
+          </td>
+          <td>
             <button class="btn-voir" onclick="afficherDetails(<?php echo $signalement['id']; ?>)">
               <i class="fas fa-eye"></i> Voir
             </button>
@@ -466,12 +476,8 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         <?php if (empty($signalements)): ?>
         <tr>
-          <td colspan="8" style="text-align: center; padding: 40px;">
+          <td colspan="9" style="text-align: center; padding: 40px;">
             📭 Aucun signalement
-            <br>
-            <a href="nouveau-signalement.php" style="display: inline-block; margin-top: 15px; padding: 10px 20px; background: #007BFF; color: white; text-decoration: none; border-radius: 5px;">
-              Créer un signalement
-            </a>
           </td>
         </tr>
         <?php endif; ?>
@@ -479,21 +485,28 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </table>
   </div>
 
+  <!-- MODAL POUR LES DÉTAILS -->
   <div class="modal" id="modalDetails">
     <div class="modal-content">
       <div class="modal-header">
         <h2>Détails du Signalement</h2>
         <button class="close-modal" onclick="fermerModal()">&times;</button>
       </div>
-      <div id="contenuDetails"></div>
+      <div id="contenuDetails">
+        <!-- Les détails seront chargés ici -->
+      </div>
+      <div style="text-align: center; margin-top: 20px;">
+        <button class="btn-voir" onclick="fermerModal()">Fermer</button>
+      </div>
     </div>
   </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-
+  <!-- SCRIPT AVEC FONCTIONS -->
   <script>
+    // Données depuis PHP
     const signalements = <?php echo json_encode($signalements); ?>;
     
+    // FONCTIONS DE FILTRAGE
     function toggleDropdown(id) {
       const menu = document.getElementById(id);
       const allMenus = document.querySelectorAll('.dropdown-menu');
@@ -510,7 +523,6 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       const rows = document.querySelectorAll('#table-body tr');
       
       rows.forEach(row => {
-        if (row.querySelector('a[href="nouveau-signalement.php"]')) return;
         const text = row.innerText.toLowerCase();
         row.style.display = text.includes(search) ? '' : 'none';
       });
@@ -520,15 +532,13 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       const rows = document.querySelectorAll('#table-body tr');
       
       rows.forEach(row => {
-        if (row.querySelector('a[href="nouveau-signalement.php"]')) return;
-        
         let show = true;
         if (value !== '') {
           if (type === 'cat') {
-            const cat = row.cells[3].innerText;
+            const cat = row.cells[4].innerText;
             show = cat.includes(value);
           } else if (type === 'statut') {
-            const statut = row.cells[5].innerText.toLowerCase();
+            const statut = row.cells[6].innerText.toLowerCase();
             show = statut.includes(value.toLowerCase());
           }
         }
@@ -541,6 +551,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       });
     }
     
+    // Fermer les menus en cliquant à l'extérieur
     document.addEventListener('click', function(e) {
       if (!e.target.closest('.dropdown')) {
         document.querySelectorAll('.dropdown-menu').forEach(menu => {
@@ -549,27 +560,17 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       }
     });
     
+    // Fonction pour afficher les détails (COMME CHEZ L'UTILISATEUR)
     function afficherDetails(id) {
+      // Trouver le signalement
       const signalement = signalements.find(s => s.id == id);
-      if (!signalement) return;
-
-      let statutTexte = '';
-      let statutBg = '';
-      switch(signalement.statut) {
-        case 'en_attente':
-          statutTexte = 'En attente';
-          statutBg = '#fdebd0';
-          break;
-        case 'en_cours':
-          statutTexte = 'En cours';
-          statutBg = '#d6eaf8';
-          break;
-        case 'resolu':
-          statutTexte = 'Résolu';
-          statutBg = '#d5f4e6';
-          break;
+      
+      if (!signalement) {
+        alert("Signalement non trouvé");
+        return;
       }
-
+      
+      // Créer le contenu HTML
       let html = `
         <div class="detail-item">
           <strong>ID:</strong> #${signalement.id.toString().padStart(3, '0')}
@@ -596,8 +597,8 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
         
         <div class="detail-item">
-          <strong>Statut:</strong> 
-          <span style="display:inline-block; padding:5px 10px; border-radius:15px; background:${statutBg};">${statutTexte}</span>
+          <strong>Statut:</strong> ${signalement.statut === 'en_attente' ? 'En attente' : 
+                                   signalement.statut === 'en_cours' ? 'En cours' : 'Résolu'}
         </div>
         
         <div class="detail-item">
@@ -605,7 +606,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
         
         <div class="detail-item">
-          <strong>Signalé par:</strong> ${signalement.nom_complet || 'Anonyme'}
+          <strong>Signalé par:</strong> ${signalement.nom_complet || 'Anonyme'} (${signalement.user_email || signalement.email || 'Email non disponible'})
         </div>
         
         <div class="detail-item">
@@ -613,66 +614,61 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
           ${signalement.description || 'Aucune description'}
         </div>
       `;
-
-      // Photos avant/après
-      html += `<div class="photo-container">`;
       
-      // Photo avant
-      html += `<div class="photo-box">`;
-      html += `<h4>📸 Avant</h4>`;
+      // Ajouter la photo si elle existe
       if (signalement.photo_path) {
-        html += `<img src="${signalement.photo_path}" alt="Photo avant">`;
-      } else {
-        html += `<div class="no-photo"><i class="fas fa-camera"></i><br>Aucune photo avant</div>`;
-      }
-      html += `</div>`;
-      
-      // Photo après
-      html += `<div class="photo-box">`;
-      html += `<h4>✅ Après</h4>`;
-      if (signalement.photo_resolution) {
-        html += `<img src="${signalement.photo_resolution}" alt="Photo après">`;
-        html += `<p style="color:#28a745; margin-top:10px;"><i class="fas fa-check-circle"></i> Résolu</p>`;
-      } else {
-        html += `<div class="no-photo"><i class="fas fa-cloud-upload-alt"></i><br>Pas encore de photo après</div>`;
-      }
-      html += `</div>`;
-      
-      html += `</div>`;
-
-      // Carte
-      if (signalement.latitude && signalement.longitude) {
-        const mapId = 'map_' + signalement.id + '_' + Date.now();
         html += `
           <div class="detail-item">
-            <strong>🗺️ Localisation:</strong>
-            <div id="${mapId}" class="map-container"></div>
+            <strong>Photo:</strong><br>
+            <img src="${signalement.photo_path}" alt="Photo" class="detail-photo" onerror="this.style.display='none'">
           </div>
         `;
       }
-
+      
+      // Ajouter la carte si les coordonnées existent
+      if (signalement.latitude && signalement.longitude) {
+        html += `
+          <div class="detail-item">
+            <strong>Localisation sur la carte:</strong>
+            <div class="map-container" id="carteDetails"></div>
+          </div>
+        `;
+      }
+      
+      // Afficher dans le modal
       document.getElementById('contenuDetails').innerHTML = html;
       document.getElementById('modalDetails').style.display = 'block';
-
+      
+      // Charger la carte Leaflet APRÈS que le modal est visible
       setTimeout(() => {
         if (signalement.latitude && signalement.longitude) {
-          const mapElements = document.querySelectorAll('[id^="map_"]');
-          if (mapElements.length > 0 && typeof L !== 'undefined') {
-            const mapElement = mapElements[mapElements.length - 1];
-            const map = L.map(mapElement.id).setView([signalement.latitude, signalement.longitude], 16);
+          if (typeof L !== 'undefined') {
+            const map = L.map('carteDetails').setView([signalement.latitude, signalement.longitude], 16);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-              attribution: '©️ OpenStreetMap'
+              attribution: '© OpenStreetMap'
             }).addTo(map);
             L.marker([signalement.latitude, signalement.longitude]).addTo(map);
+          } else {
+            // Si Leaflet n'est pas chargé, charger maintenant
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/leaflet@1.9.3/dist/leaflet.js';
+            script.onload = function() {
+              const map = L.map('carteDetails').setView([signalement.latitude, signalement.longitude], 16);
+              L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+              L.marker([signalement.latitude, signalement.longitude]).addTo(map);
+            };
+            document.head.appendChild(script);
           }
         }
-      }, 200);
+      }, 100);
     }
     
+    // Fermer le modal
     function fermerModal() {
       document.getElementById('modalDetails').style.display = 'none';
     }
     
+    // Fermer en cliquant à l'extérieur
     window.onclick = function(event) {
       const modal = document.getElementById('modalDetails');
       if (event.target == modal) {
@@ -680,5 +676,6 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       }
     }
   </script>
+
 </body>
 </html>

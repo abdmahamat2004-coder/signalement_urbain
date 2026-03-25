@@ -20,23 +20,29 @@ try {
     die("Erreur de connexion : " . $e->getMessage());
 }
 
-// COMPTER LES SIGNALEMENTS RÉELS
+// COMPTER LES SIGNALEMENTS de l'utilisateur connecté
 $user_id = $_SESSION['user_id'];
 
-// 1. Nombre de signalements EN ATTENTE
 $stmt_attente = $pdo->prepare("SELECT COUNT(*) FROM signalements WHERE user_id = ? AND statut = 'en_attente'");
 $stmt_attente->execute([$user_id]);
 $en_attente = $stmt_attente->fetchColumn();
 
-// 2. Nombre de signalements RÉSOLUS
+$stmt_cours = $pdo->prepare("SELECT COUNT(*) FROM signalements WHERE user_id = ? AND statut = 'en_cours'");
+$stmt_cours->execute([$user_id]);
+$en_cours = $stmt_cours->fetchColumn();
+
 $stmt_resolus = $pdo->prepare("SELECT COUNT(*) FROM signalements WHERE user_id = ? AND statut = 'resolu'");
 $stmt_resolus->execute([$user_id]);
 $resolus = $stmt_resolus->fetchColumn();
 
-// 3. Récupérer les derniers signalements pour le tableau
-$stmt_derniers = $pdo->prepare("SELECT * FROM signalements WHERE user_id = ? ORDER BY date_signalement DESC LIMIT 5");
-$stmt_derniers->execute([$user_id]);
-$derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
+// Récupérer UNIQUEMENT les signalements de l'utilisateur connecté
+$stmt_mes_signalements = $pdo->prepare("SELECT s.*, u.nom_complet 
+                                         FROM signalements s 
+                                         LEFT JOIN utilisateurs u ON s.user_id = u.id 
+                                         WHERE s.user_id = ?
+                                         ORDER BY s.date_signalement DESC");
+$stmt_mes_signalements->execute([$user_id]);
+$mes_signalements = $stmt_mes_signalements->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <!DOCTYPE html>
@@ -46,8 +52,8 @@ $derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Tableau de bord Utilisateur</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   
-  <!-- VOTRE STYLE CSS (copié depuis votre HTML) -->
   <style>
     * {
       margin: 0;
@@ -200,6 +206,10 @@ $derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
       background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
     }
 
+    .card.blue {
+      background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+    }
+
     .card.green {
       background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
     }
@@ -235,12 +245,17 @@ $derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /* Tableau */
-    .signalement-table {
-      width: 100%;
+    .table-container {
+      overflow-x: auto;
       background: white;
       border-radius: 10px;
-      overflow: hidden;
       box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    }
+
+    .signalement-table {
+      width: 100%;
+      min-width: 800px;
+      border-collapse: collapse;
     }
 
     .signalement-table thead {
@@ -275,6 +290,7 @@ $derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
       font-size: 14px;
       font-weight: 600;
       text-transform: uppercase;
+      display: inline-block;
     }
 
     .badge.green {
@@ -285,6 +301,148 @@ $derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
     .badge.orange {
       background-color: #fdebd0;
       color: #e67e22;
+    }
+
+    .badge.blue {
+      background-color: #d6eaf8;
+      color: #3498db;
+    }
+
+    /* Bouton Voir */
+    .btn-voir {
+      background: #28a745;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .btn-voir:hover {
+      background: #218838;
+    }
+
+    /* Message quand aucun signalement */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #7f8c8d;
+    }
+
+    .empty-state i {
+      font-size: 48px;
+      margin-bottom: 15px;
+      color: #ccc;
+    }
+
+    .empty-state a {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 12px 25px;
+      background: #3498db;
+      color: white;
+      text-decoration: none;
+      border-radius: 5px;
+      transition: background 0.3s;
+    }
+
+    .empty-state a:hover {
+      background: #2980b9;
+    }
+
+    /* MODAL */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-content {
+      background: white;
+      width: 90%;
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 20px;
+      border-radius: 10px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 15px;
+      margin-bottom: 20px;
+    }
+
+    .close-modal {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #666;
+    }
+
+    .detail-item {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 5px;
+    }
+
+    .detail-item strong {
+      color: #28a745;
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .photo-container {
+      display: flex;
+      gap: 20px;
+      margin: 20px 0;
+    }
+
+    .photo-box {
+      flex: 1;
+      text-align: center;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 5px;
+    }
+
+    .photo-box h4 {
+      color: #28a745;
+      margin-bottom: 10px;
+    }
+
+    .photo-box img {
+      max-width: 100%;
+      max-height: 250px;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+    }
+
+    .no-photo {
+      padding: 30px;
+      color: #999;
+    }
+
+    .map-container {
+      height: 300px;
+      width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      margin-top: 10px;
     }
 
     /* Responsive */
@@ -312,6 +470,10 @@ $derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
       
       .search-bar {
         max-width: 100%;
+      }
+
+      .photo-container {
+        flex-direction: column;
       }
     }
 
@@ -341,86 +503,100 @@ $derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
 </head>
 <body>
 
-  <!-- Icône du menu -->
   <div id="menu-icon">
     <i class="fas fa-bars"></i>
   </div>
 
-  <!-- Menu latéral -->
   <aside class="sidebar hidden" id="sidebar">
     <ul>
       <li><a href="tableau_de_bord.php"><i class="fas fa-tachometer-alt"></i> Tableau de bord</a></li>
       <li><a href="profil-utilisateur.php"><i class="fas fa-user"></i> Profil utilisateur</a></li>
-      <li><a href="liste-sign-utilisateur.php"><i class="fas fa-list-alt"></i> Liste des signalements</a></li>
+      <li><a href="liste-sign-utilisateur.php"><i class="fas fa-list-alt"></i> Tous les signalements</a></li>
       <li><a href="nouveau-signalement.php"><i class="fas fa-exclamation-circle"></i> Signaler un problème</a></li>
       <li class="logout"><a href="deconnexion.php"><i class="fas fa-sign-out-alt"></i> Déconnexion</a></li>
     </ul>
   </aside>
 
-  <!-- Contenu principal -->
   <main class="main-content" id="main-content">
-    <!-- En-tête -->
     <div class="top-bar">
-      <h1>Tableau de bord d'utilisateur</h1>
+      <h1>Mon tableau de bord</h1>
       <p style="color: #666; margin-top: 10px; font-size: 0.9rem;">
         Bienvenue, <strong><?php echo htmlspecialchars($_SESSION['user_nom']); ?></strong>
       </p>
     </div>
 
-    <!-- Cartes statistiques DYNAMIQUES -->
     <div class="cards">
       <div class="card orange">En attente: <?php echo $en_attente; ?></div>
+      <div class="card blue">En cours: <?php echo $en_cours; ?></div>
       <div class="card green">Résolu: <?php echo $resolus; ?></div>
     </div>
 
-    <!-- Barre de recherche -->
     <div class="search-bar">
-      <input type="text" id="search" placeholder="Rechercher un signalement...">
+      <input type="text" id="search" placeholder="Rechercher dans mes signalements...">
       <i class="fas fa-search"></i>
     </div>
 
-    <!-- Tableau de signalements DYNAMIQUE -->
-    <table class="signalement-table">
-      <thead>
-        <tr>
-          <th>Description</th>
-          <th>Rue</th>
-          <th>Date</th>
-          <th>Statut</th>
-        </tr>
-      </thead>
-      <tbody id="table-content">
-        <?php if (empty($derniers_signalements)): ?>
-        <tr>
-          <td colspan="4" style="text-align: center; padding: 40px; color: #7f8c8d;">
-            <i class="fas fa-inbox" style="font-size: 24px; margin-bottom: 10px; display: block;"></i>
-            Aucun signalement pour le moment
-            <br>
-            <a href="nouveau-signalement.php" style="display: inline-block; margin-top: 15px; padding: 10px 20px; background: #3498db; color: white; text-decoration: none; border-radius: 5px;">
-              Créer mon premier signalement
-            </a>
-          </td>
-        </tr>
-        <?php else: ?>
-        
-        <?php foreach ($derniers_signalements as $signalement): 
-          $status_class = $signalement['statut'] == 'resolu' ? 'badge green' : 'badge orange';
-          $status_text = $signalement['statut'] == 'resolu' ? 'Résolu' : 'En attente';
-        ?>
-        <tr>
-          <td><?php echo htmlspecialchars($signalement['titre']); ?></td>
-          <td><?php echo htmlspecialchars($signalement['rue']); ?></td>
-          <td><?php echo date('d/m/Y', strtotime($signalement['date_signalement'])); ?></td>
-          <td><span class="<?php echo $status_class; ?>"><?php echo $status_text; ?></span></td>
-        </tr>
-        <?php endforeach; ?>
-        
-        <?php endif; ?>
-      </tbody>
-    </table>
+    <div class="table-container">
+      <table class="signalement-table" id="signalementTable">
+        <thead>
+          <tr>
+            <th>Titre</th>
+            <th>Rue</th>
+            <th>Date</th>
+            <th>Statut</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="table-body">
+          <?php if (empty($mes_signalements)): ?>
+          <tr>
+            <td colspan="5">
+              <div class="empty-state">
+                <i class="fas fa-inbox"></i>
+                <h3>Aucun signalement</h3>
+                <p>Vous n'avez pas encore créé de signalement.</p>
+                <a href="nouveau-signalement.php">Créer mon premier signalement</a>
+              </div>
+            </td>
+          </tr>
+          <?php else: ?>
+          
+          <?php foreach ($mes_signalements as $signalement): 
+            $status_class = $signalement['statut'] == 'resolu' ? 'badge green' : ($signalement['statut'] == 'en_cours' ? 'badge blue' : 'badge orange');
+            $status_text = $signalement['statut'] == 'resolu' ? 'Résolu' : ($signalement['statut'] == 'en_cours' ? 'En cours' : 'En attente');
+          ?>
+          <tr>
+            <td><?php echo htmlspecialchars($signalement['titre']); ?></td>
+            <td><?php echo htmlspecialchars($signalement['rue'] ?? 'Non spécifiée'); ?></td>
+            <td><?php echo date('d/m/Y', strtotime($signalement['date_signalement'])); ?></td>
+            <td><span class="<?php echo $status_class; ?>"><?php echo $status_text; ?></span></td>
+            <td>
+              <button class="btn-voir" onclick="afficherDetails(<?php echo $signalement['id']; ?>)">
+                <i class="fas fa-eye"></i> Voir
+              </button>
+            </td>
+          </tr>
+          <?php endforeach; ?>
+          
+          <?php endif; ?>
+        </tbody>
+      </table>
+    </div>
   </main>
 
-  <!-- JavaScript (VOTRE CODE EXACT) -->
+  <!-- MODAL POUR LES DÉTAILS -->
+  <div class="modal" id="modalDetails">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Détails du Signalement</h2>
+        <button class="close-modal" onclick="fermerModal()">&times;</button>
+      </div>
+      <div id="contenuDetails"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+
   <script>
     const menuIcon = document.getElementById('menu-icon');
     const sidebar = document.getElementById('sidebar');
@@ -437,16 +613,152 @@ $derniers_signalements = $stmt_derniers->fetchAll(PDO::FETCH_ASSOC);
     });
 
     const searchInput = document.getElementById("search");
-    const tableRows = document.querySelectorAll("#table-content tr");
+    const tableRows = document.querySelectorAll("#table-body tr");
 
-    if (searchInput && tableRows.length > 0) {
+    if (searchInput) {
       searchInput.addEventListener("keyup", function () {
         const value = searchInput.value.toLowerCase();
         tableRows.forEach(row => {
+          // Ignorer la ligne du message vide
+          if (row.querySelector('.empty-state')) return;
           const text = row.textContent.toLowerCase();
           row.style.display = text.includes(value) ? "" : "none";
         });
       });
+    }
+
+    // Données des signalements
+    const signalements = <?php echo json_encode($mes_signalements); ?>;
+
+    function afficherDetails(id) {
+      const signalement = signalements.find(s => s.id == id);
+      if (!signalement) return;
+
+      let statutTexte = '';
+      let statutBg = '';
+      switch(signalement.statut) {
+        case 'en_attente':
+          statutTexte = 'En attente';
+          statutBg = '#fdebd0';
+          break;
+        case 'en_cours':
+          statutTexte = 'En cours';
+          statutBg = '#d6eaf8';
+          break;
+        case 'resolu':
+          statutTexte = 'Résolu';
+          statutBg = '#d5f4e6';
+          break;
+      }
+
+      let html = `
+        <div class="detail-item">
+          <strong>ID:</strong> #${signalement.id.toString().padStart(3, '0')}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Titre:</strong> ${signalement.titre || ''}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Rue:</strong> ${signalement.rue || 'Non spécifiée'}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Quartier:</strong> ${signalement.quartier || 'Non spécifié'}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Catégorie:</strong> ${signalement.categorie || ''}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Date:</strong> ${new Date(signalement.date_signalement).toLocaleDateString('fr-FR')}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Statut:</strong> 
+          <span style="display:inline-block; padding:5px 10px; border-radius:15px; background:${statutBg};">${statutTexte}</span>
+        </div>
+        
+        <div class="detail-item">
+          <strong>Gravité:</strong> ${signalement.niveau || 'Non spécifiée'}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Signalé par:</strong> ${signalement.nom_complet || 'Anonyme'}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Description:</strong><br>
+          ${signalement.description || 'Aucune description'}
+        </div>
+      `;
+
+      // Photos avant/après
+      html += `<div class="photo-container">`;
+      
+      // Photo avant
+      html += `<div class="photo-box">`;
+      html += `<h4>📸 Avant</h4>`;
+      if (signalement.photo_path) {
+        html += `<img src="${signalement.photo_path}" alt="Photo avant">`;
+      } else {
+        html += `<div class="no-photo"><i class="fas fa-camera"></i><br>Aucune photo avant</div>`;
+      }
+      html += `</div>`;
+      
+      // Photo après
+      html += `<div class="photo-box">`;
+      html += `<h4>✅ Après</h4>`;
+      if (signalement.photo_resolution) {
+        html += `<img src="${signalement.photo_resolution}" alt="Photo après">`;
+        html += `<p style="color:#28a745; margin-top:10px;"><i class="fas fa-check-circle"></i> Résolu</p>`;
+      } else {
+        html += `<div class="no-photo"><i class="fas fa-cloud-upload-alt"></i><br>Pas encore de photo après</div>`;
+      }
+      html += `</div>`;
+      
+      html += `</div>`;
+
+      // Carte
+      if (signalement.latitude && signalement.longitude) {
+        const mapId = 'map_' + signalement.id + '_' + Date.now();
+        html += `
+          <div class="detail-item">
+            <strong>🗺️ Localisation:</strong>
+            <div id="${mapId}" class="map-container"></div>
+          </div>
+        `;
+      }
+
+      document.getElementById('contenuDetails').innerHTML = html;
+      document.getElementById('modalDetails').style.display = 'flex';
+
+      setTimeout(() => {
+        if (signalement.latitude && signalement.longitude) {
+          const mapElements = document.querySelectorAll('[id^="map_"]');
+          if (mapElements.length > 0 && typeof L !== 'undefined') {
+            const mapElement = mapElements[mapElements.length - 1];
+            const map = L.map(mapElement.id).setView([signalement.latitude, signalement.longitude], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              attribution: '©️ OpenStreetMap'
+            }).addTo(map);
+            L.marker([signalement.latitude, signalement.longitude]).addTo(map);
+          }
+        }
+      }, 200);
+    }
+
+    function fermerModal() {
+      document.getElementById('modalDetails').style.display = 'none';
+    }
+
+    window.onclick = function(e) {
+      const modal = document.getElementById('modalDetails');
+      if (e.target == modal) {
+        modal.style.display = 'none';
+      }
     }
   </script>
 

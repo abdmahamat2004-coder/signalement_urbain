@@ -1,3 +1,86 @@
+<?php
+// Démarrer la session
+session_start();
+
+// Connexion à la base de données
+$host = 'localhost';
+$dbname = 'mon_app';
+$username = 'root';
+$password = '';
+
+try {
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch(PDOException $e) {
+    die("Erreur de connexion : " . $e->getMessage());
+}
+
+// Traitement du formulaire
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $nom = trim($_POST['nom']);
+    $email = trim($_POST['email']);
+    $mdp = $_POST['mdp'];
+    $confirmMdp = $_POST['confirm-mdp'];
+    
+    // Validation
+    $errors = [];
+    
+    // Vérifier les champs vides
+    if (empty($nom)) $errors[] = "Le nom complet est requis.";
+    if (empty($email)) $errors[] = "L'adresse email est requise.";
+    if (empty($mdp)) $errors[] = "Le mot de passe est requis.";
+    if (empty($confirmMdp)) $errors[] = "La confirmation du mot de passe est requise.";
+    
+    // Vérifier l'email
+    if (!empty($email) && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = "Vérifiez votre adresse email.";
+    }
+    
+    // Vérifier la longueur du mot de passe
+    if (!empty($mdp) && strlen($mdp) < 6) {
+        $errors[] = "Le mot de passe doit contenir au moins 6 caractères.";
+    }
+    
+    // Vérifier la confirmation
+    if (!empty($mdp) && !empty($confirmMdp) && $mdp !== $confirmMdp) {
+        $errors[] = "Les mots de passe ne correspondent pas.";
+    }
+    
+    // Vérifier si l'email existe déjà
+    if (empty($errors)) {
+        try {
+            $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ?");
+            $stmt->execute([$email]);
+            if ($stmt->rowCount() > 0) {
+                $errors[] = "Cet email est déjà utilisé.";
+            }
+        } catch(PDOException $e) {
+            $errors[] = "Erreur lors de la vérification de l'email.";
+        }
+    }
+    
+    // Si aucune erreur, créer le compte
+    if (empty($errors)) {
+        // Hasher le mot de passe
+        $mdpHash = password_hash($mdp, PASSWORD_DEFAULT);
+        
+        try {
+            $stmt = $pdo->prepare("INSERT INTO utilisateurs (nom_complet, email, mot_de_passe) VALUES (?, ?, ?)");
+            $stmt->execute([$nom, $email, $mdpHash]);
+            
+            // Message de succès
+            $success_message = '✅ Compte créé avec succès ! <a href="connexion.php">Connectez-vous ici</a>';
+            
+            // Réinitialiser les champs
+            $nom = $email = '';
+            
+        } catch(PDOException $e) {
+            $errors[] = "Erreur lors de la création du compte : " . $e->getMessage();
+        }
+    }
+}
+?>
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -189,94 +272,18 @@
     <h2>Créer un compte</h2>
 
     <?php
-    // Démarrer la session
-    session_start();
-    
-    // Connexion à la base de données
-    $host = 'localhost';
-    $dbname = 'mon_app';
-    $username = 'root';
-    $password = '';
-    
-    try {
-        $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    } catch(PDOException $e) {
-        die("Erreur de connexion : " . $e->getMessage());
+    // Afficher le message de succès s'il existe
+    if (isset($success_message)) {
+        echo '<div class="success">' . $success_message . '</div>';
     }
     
-    // Traitement du formulaire
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $nom = trim($_POST['nom']);
-        $email = trim($_POST['email']);
-        $mdp = $_POST['mdp'];
-        $confirmMdp = $_POST['confirm-mdp'];
-        
-        // Validation
-        $errors = [];
-        
-        // Vérifier les champs vides
-        if (empty($nom)) $errors[] = "Le nom complet est requis.";
-        if (empty($email)) $errors[] = "L'adresse email est requise.";
-        if (empty($mdp)) $errors[] = "Le mot de passe est requis.";
-        if (empty($confirmMdp)) $errors[] = "La confirmation du mot de passe est requise.";
-        
-        // Vérifier l'email
-        if (!empty($email) && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $errors[] = "Vérifiez votre adresse email.";
+    // Afficher les erreurs s'il y en a
+    if (isset($errors) && !empty($errors)) {
+        echo '<div class="error">';
+        foreach ($errors as $error) {
+            echo htmlspecialchars($error) . '<br>';
         }
-        
-        // Vérifier la longueur du mot de passe
-        if (!empty($mdp) && strlen($mdp) < 6) {
-            $errors[] = "Le mot de passe doit contenir au moins 6 caractères.";
-        }
-        
-        // Vérifier la confirmation
-        if (!empty($mdp) && !empty($confirmMdp) && $mdp !== $confirmMdp) {
-            $errors[] = "Les mots de passe ne correspondent pas.";
-        }
-        
-        // Vérifier si l'email existe déjà
-        if (empty($errors)) {
-            try {
-                $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ?");
-                $stmt->execute([$email]);
-                if ($stmt->rowCount() > 0) {
-                    $errors[] = "Cet email est déjà utilisé.";
-                }
-            } catch(PDOException $e) {
-                $errors[] = "Erreur lors de la vérification de l'email.";
-            }
-        }
-        
-        // Si aucune erreur, créer le compte
-        if (empty($errors)) {
-            // Hasher le mot de passe
-            $mdpHash = password_hash($mdp, PASSWORD_DEFAULT);
-            
-            try {
-                $stmt = $pdo->prepare("INSERT INTO utilisateurs (nom_complet, email, mot_de_passe) VALUES (?, ?, ?)");
-                $stmt->execute([$nom, $email, $mdpHash]);
-                
-                // Message de succès
-                echo '<div class="success">✅ Compte créé avec succès ! <a href="connexion.php">Connectez-vous ici</a></div>';
-                
-                // Réinitialiser les champs
-                $nom = $email = '';
-                
-            } catch(PDOException $e) {
-                $errors[] = "Erreur lors de la création du compte : " . $e->getMessage();
-            }
-        }
-        
-        // Afficher les erreurs
-        if (!empty($errors)) {
-            echo '<div class="error">';
-            foreach ($errors as $error) {
-                echo htmlspecialchars($error) . '<br>';
-            }
-            echo '</div>';
-        }
+        echo '</div>';
     }
     ?>
 

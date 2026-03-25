@@ -56,11 +56,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['user_id'] = $user['id'];
                     $_SESSION['user_nom'] = $user['nom_complet'];
                     $_SESSION['user_email'] = $user['email'];
-                    $_SESSION['user_role'] = $user['role'];  // ← NOUVEAU : stocker le rôle
+                    $_SESSION['user_role'] = $user['role'];
                     
                     // Redirection selon le rôle
                     if ($user['role'] == 'admin') {
                         header('Location: tableau_de_bord_admin.php');
+                    } elseif ($user['role'] == 'agent') {
+                        header('Location: tableau_de_bord_agent.php');
                     } else {
                         header('Location: tableau_de_bord.php');
                     }
@@ -82,6 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 if (isset($_SESSION['user_id'])) {
     if ($_SESSION['user_role'] == 'admin') {
         header('Location: tableau_de_bord_admin.php');
+    } elseif ($_SESSION['user_role'] == 'agent') {
+        header('Location: tableau_de_bord_agent.php');
     } else {
         header('Location: tableau_de_bord.php');
     }
@@ -94,7 +98,7 @@ if (isset($_SESSION['user_id'])) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Connexion</title>
+  <title>Connexion - URBAN ALERT</title>
   
   <style>
     /* Variables CSS pour une gestion cohérente */
@@ -148,11 +152,27 @@ if (isset($_SESSION['user_id'])) {
       animation: fadeIn 0.5s ease-out;
     }
 
+    .logo {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .logo h1 {
+      color: var(--primary-color);
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .logo p {
+      color: #666;
+      font-size: 0.9rem;
+    }
+
     h2 {
       text-align: center;
       color: var(--primary-color);
       margin-bottom: 25px;
-      font-size: 1.8rem;
+      font-size: 1.5rem;
       font-weight: 600;
     }
 
@@ -295,40 +315,6 @@ if (isset($_SESSION['user_id'])) {
       position: relative;
     }
 
-    /* Boutons sociaux */
-    .social-login {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-
-    .social-btn {
-      flex: 1;
-      padding: 12px;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      background: white;
-      cursor: pointer;
-      transition: var(--transition);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      font-size: 14px;
-    }
-
-    .social-btn:hover {
-      background: var(--light-gray);
-    }
-
-    .social-btn.google {
-      color: #db4437;
-    }
-
-    .social-btn.facebook {
-      color: #4267B2;
-    }
-
     /* Lien d'inscription */
     .register-link {
       text-align: center;
@@ -357,18 +343,18 @@ if (isset($_SESSION['user_id'])) {
         max-width: 400px;
       }
       
+      .logo h1 {
+        font-size: 1.8rem;
+      }
+      
       h2 {
-        font-size: 1.6rem;
+        font-size: 1.3rem;
       }
       
       .options {
         flex-direction: column;
         align-items: flex-start;
         gap: 15px;
-      }
-      
-      .social-login {
-        flex-direction: column;
       }
     }
 
@@ -381,61 +367,27 @@ if (isset($_SESSION['user_id'])) {
         padding: 20px 15px;
       }
       
+      .logo h1 {
+        font-size: 1.5rem;
+      }
+      
       h2 {
-        font-size: 1.4rem;
-        margin-bottom: 20px;
+        font-size: 1.2rem;
       }
       
       input, .btn {
         padding: 12px;
-      }
-      
-      .field {
-        margin-bottom: 15px;
-      }
-    }
-
-    @media (max-width: 320px) {
-      .container {
-        padding: 15px 10px;
-      }
-      
-      h2 {
-        font-size: 1.3rem;
-      }
-    }
-
-    /* Mode sombre facultatif */
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --text-color: #f0f0f0;
-        --light-gray: #2a2a2a;
-        --border-color: #444;
-      }
-      
-      body {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      }
-      
-      .container {
-        background: #2d3748;
-        color: var(--text-color);
-      }
-      
-      input {
-        background-color: #4a5568;
-        border-color: #4a5568;
-        color: white;
-      }
-      
-      input:focus {
-        background-color: #2d3748;
       }
     }
   </style>
 </head>
 <body>
   <div class="container">
+    <div class="logo">
+      <h1>URBAN ALERT</h1>
+      <p>Plateforme de signalement urbain</p>
+    </div>
+
     <h2>Connexion</h2>
 
     <?php
@@ -454,18 +406,8 @@ if (isset($_SESSION['user_id'])) {
     }
     ?>
 
-    <!-- Optionnel: Connexion sociale -->
-    <div class="social-login">
-      <button class="social-btn google">
-        <i class="fab fa-google"></i> Google
-      </button>
-      <button class="social-btn facebook">
-        <i class="fab fa-facebook-f"></i> Facebook
-      </button>
-    </div>
-
     <div class="separator">
-      <span>Ou connectez-vous avec email</span>
+      <span>Connectez-vous avec votre email</span>
     </div>
 
     <form method="POST" action="">
@@ -477,7 +419,7 @@ if (isset($_SESSION['user_id'])) {
 
       <div class="field">
         <label for="mdp">Mot de passe</label>
-        <input type="password" id="mdp" name="mdp" placeholder="" required>
+        <input type="password" id="mdp" name="mdp" placeholder="••••••••" required>
       </div>
 
       <div class="options">
@@ -498,19 +440,5 @@ if (isset($_SESSION['user_id'])) {
 
   <!-- Ajout des icônes Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-
-  <script>
-    // Gestion du mode sombre
-    function updateDarkMode() {
-      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.body.classList.add('dark-mode');
-      } else {
-        document.body.classList.remove('dark-mode');
-      }
-    }
-
-    window.matchMedia('(prefers-color-scheme: dark)').addListener(updateDarkMode);
-    updateDarkMode();
-  </script>
 </body>
 </html>

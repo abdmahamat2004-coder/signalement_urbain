@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Vérifier si l'utilisateur est connecté
-if (!isset($_SESSION['user_id'])) {
+// Vérifier si l'utilisateur est connecté ET est administrateur
+if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
     header('Location: connexion.php');
     exit();
 }
@@ -20,13 +20,31 @@ try {
     die("Erreur de connexion : " . $e->getMessage());
 }
 
-// Récupérer TOUS les signalements
-$stmt = $pdo->prepare("SELECT s.*, u.nom_complet 
-                       FROM signalements s 
-                       LEFT JOIN utilisateurs u ON s.user_id = u.id 
-                       ORDER BY s.date_signalement DESC");
-$stmt->execute();
+// RÉCUPÉRER TOUS LES SIGNALEMENTS (pas seulement ceux d'un utilisateur)
+$sql = "SELECT s.*, u.nom_complet FROM signalements s 
+        LEFT JOIN utilisateurs u ON s.user_id = u.id 
+        ORDER BY s.date_signalement DESC";
+$stmt = $pdo->query($sql);
 $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// TRAITEMENT DU CHANGEMENT DE STATUT (si formulaire envoyé)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['changer_statut'])) {
+    $signalement_id = $_POST['signalement_id'];
+    $nouveau_statut = $_POST['nouveau_statut'];
+    
+    try {
+        $stmt = $pdo->prepare("UPDATE signalements SET statut = ? WHERE id = ?");
+        $stmt->execute([$nouveau_statut, $signalement_id]);
+        
+        // Recharger les signalements
+        $stmt = $pdo->query($sql);
+        $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $message_success = "✅ Statut mis à jour avec succès !";
+    } catch(PDOException $e) {
+        $message_erreur = "❌ Erreur : " . $e->getMessage();
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -34,10 +52,10 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tous les Signalements</title>
+  <title>Liste des Signalements - Admin</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <style>
+    /* MÊME STYLE QUE liste-sign-utilisateur.php */
     body { font-family: Arial; margin: 0; background: #f5f7fa; }
     
     .header {
@@ -57,7 +75,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
     .container {
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 20px auto;
       padding: 0 20px;
     }
@@ -68,8 +86,10 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       border-radius: 10px;
       margin-bottom: 20px;
       text-align: center;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
     
+    /* FILTRES ET RECHERCHE */
     .filters {
       background: white;
       padding: 20px;
@@ -157,6 +177,28 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       color: #007BFF;
     }
     
+    /* MESSAGES */
+    .success-message {
+      background: #d4edda;
+      color: #155724;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      text-align: center;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .error-message {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      text-align: center;
+      border: 1px solid #f5c6cb;
+    }
+    
+    /* TABLEAU */
     table {
       width: 100%;
       background: white;
@@ -176,12 +218,14 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     td {
       padding: 15px;
       border-bottom: 1px solid #eee;
+      vertical-align: middle;
     }
     
     tr:hover {
       background: #f8f9fa;
     }
     
+    /* BOUTONS */
     .btn-voir {
       background: #28a745;
       color: white;
@@ -189,10 +233,52 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       padding: 8px 12px;
       border-radius: 5px;
       cursor: pointer;
+      font-size: 14px;
     }
     
     .btn-voir:hover {
       background: #218838;
+    }
+    
+    .btn-modifier {
+      background: #ffc107;
+      color: black;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .btn-modifier:hover {
+      background: #e0a800;
+    }
+    
+    .btn-supprimer {
+      background: #dc3545;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .btn-supprimer:hover {
+      background: #c82333;
+    }
+    
+    /* FORMULAIRE DE STATUT */
+    .statut-form {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
+    .statut-select {
+      padding: 6px 10px;
+      border-radius: 5px;
+      border: 1px solid #ddd;
     }
     
     /* MODAL */
@@ -210,11 +296,11 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     .modal-content {
       background: white;
       width: 90%;
-      max-width: 900px;
-      margin: 30px auto;
+      max-width: 800px;
+      margin: 50px auto;
       padding: 20px;
       border-radius: 10px;
-      max-height: 90vh;
+      max-height: 80vh;
       overflow-y: auto;
     }
     
@@ -245,39 +331,14 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     .detail-item strong {
       color: #007BFF;
-      display: block;
-      margin-bottom: 5px;
     }
     
-    .photo-container {
-      display: flex;
-      gap: 20px;
-      margin: 20px 0;
-    }
-    
-    .photo-box {
-      flex: 1;
-      text-align: center;
-      padding: 15px;
-      background: #f8f9fa;
-      border-radius: 5px;
-    }
-    
-    .photo-box h4 {
-      color: #007BFF;
-      margin-bottom: 10px;
-    }
-    
-    .photo-box img {
+    .detail-photo {
       max-width: 100%;
-      max-height: 250px;
+      max-height: 300px;
       border-radius: 5px;
       border: 1px solid #ddd;
-    }
-    
-    .no-photo {
-      padding: 30px;
-      color: #999;
+      margin-top: 10px;
     }
     
     .map-container {
@@ -288,6 +349,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       margin-top: 10px;
     }
     
+    /* STATUT */
     .status {
       display: inline-flex;
       align-items: center;
@@ -328,6 +390,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       background: #28a745;
     }
     
+    /* RESPONSIVE */
     @media (max-width: 768px) {
       .filters {
         flex-direction: column;
@@ -345,38 +408,51 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         width: 100%;
       }
       
-      .photo-container {
-        flex-direction: column;
+      table {
+        font-size: 14px;
+      }
+      
+      th, td {
+        padding: 10px;
       }
     }
   </style>
 </head>
 <body>
 
+  <!-- EN-TÊTE -->
   <div class="header">
     <div>
-      
-      <a href="tableau_de_bord.php"><i class="fas fa-home"></i></a>
+      <a href="tableau_de_bord_admin.php"><i class="fas fa-arrow-left"></i> Retour</a>
+      <a href="tableau_de_bord_admin.php"><i class="fas fa-home"></i></a>
     </div>
-    <span style="font-weight: bold;">Tous les Signalements</span>
-    <a href="profil-utilisateur.php"><i class="fas fa-user"></i></a>
+    <span style="font-weight: bold;">Signalements - Administration</span>
+    <a href="profil-admin.php"><i class="fas fa-user-cog"></i></a>
   </div>
 
+  <!-- CONTENU -->
   <div class="container">
     <div class="title">
-      <h1>Tous les Signalements</h1>
-      <p>Visualisez tous les signalements de la plateforme</p>
+      <h1>Gestion des Signalements</h1>
+      <p>Vous pouvez voir, modifier et gérer tous les signalements</p>
     </div>
 
-    <?php if (isset($_GET['success'])): ?>
-    <div style="background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin-bottom: 20px;">
-      ✅ Signalement créé avec succès !
+    <?php if (isset($message_success)): ?>
+    <div class="success-message">
+      <?php echo $message_success; ?>
+    </div>
+    <?php endif; ?>
+    
+    <?php if (isset($message_erreur)): ?>
+    <div class="error-message">
+      <?php echo $message_erreur; ?>
     </div>
     <?php endif; ?>
 
+    <!-- FILTRES ET RECHERCHE -->
     <div class="filters">
       <div class="search-container">
-        <input type="text" id="search" placeholder="Rechercher dans les signalements..." onkeyup="filterRows()">
+        <input type="text" id="search" placeholder="Rechercher un signalement..." onkeyup="filterRows()">
       </div>
       
       <div class="filter-group">
@@ -411,21 +487,21 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       </div>
     </div>
 
+    <!-- TABLEAU DES SIGNALEMENTS -->
     <table id="signalementTable">
       <thead>
         <tr>
           <th>ID</th>
           <th>Titre</th>
-          <th>Rue</th>
-          <th>Signalé par</th>
-          <th>Catégorie</th>
+          <th>Utilisateur</th>
           <th>Date</th>
           <th>Statut</th>
-          <th>Action</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="table-body">
         <?php foreach ($signalements as $signalement): 
+          // Déterminer le statut
           $status_class = '';
           $status_text = '';
           
@@ -447,9 +523,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <tr>
           <td>#<?php echo str_pad($signalement['id'], 3, '0', STR_PAD_LEFT); ?></td>
           <td><?php echo htmlspecialchars($signalement['titre']); ?></td>
-          <td><?php echo htmlspecialchars($signalement['rue'] ?? 'Non spécifiée'); ?></td>
           <td><?php echo htmlspecialchars($signalement['nom_complet'] ?? 'Anonyme'); ?></td>
-          <td><?php echo htmlspecialchars($signalement['categorie']); ?></td>
           <td><?php echo date('d/m/Y', strtotime($signalement['date_signalement'])); ?></td>
           <td>
             <div class="status <?php echo $status_class; ?>">
@@ -457,21 +531,36 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </div>
           </td>
           <td>
-            <button class="btn-voir" onclick="afficherDetails(<?php echo $signalement['id']; ?>)">
-              <i class="fas fa-eye"></i> Voir
-            </button>
+            <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+              <button class="btn-voir" onclick="afficherDetails(<?php echo $signalement['id']; ?>)">
+                <i class="fas fa-eye"></i> Voir
+              </button>
+              
+              <!-- FORMULAIRE POUR CHANGER LE STATUT -->
+              <form method="POST" action="" class="statut-form" style="display: inline;">
+                <input type="hidden" name="signalement_id" value="<?php echo $signalement['id']; ?>">
+                <select name="nouveau_statut" class="statut-select" onchange="this.form.submit()">
+                  <option value="en_attente" <?php echo $signalement['statut'] == 'en_attente' ? 'selected' : ''; ?>>En attente</option>
+                  <option value="en_cours" <?php echo $signalement['statut'] == 'en_cours' ? 'selected' : ''; ?>>En cours</option>
+                  <option value="resolu" <?php echo $signalement['statut'] == 'resolu' ? 'selected' : ''; ?>>Résolu</option>
+                </select>
+                <button type="submit" name="changer_statut" class="btn-modifier" style="display: none;">
+                  <i class="fas fa-sync-alt"></i>
+                </button>
+              </form>
+              
+              <button class="btn-supprimer" onclick="supprimerSignalement(<?php echo $signalement['id']; ?>, '<?php echo htmlspecialchars($signalement['titre']); ?>')">
+                <i class="fas fa-trash"></i> Suppr.
+              </button>
+            </div>
           </td>
         </tr>
         <?php endforeach; ?>
         
         <?php if (empty($signalements)): ?>
         <tr>
-          <td colspan="8" style="text-align: center; padding: 40px;">
-            📭 Aucun signalement
-            <br>
-            <a href="nouveau-signalement.php" style="display: inline-block; margin-top: 15px; padding: 10px 20px; background: #007BFF; color: white; text-decoration: none; border-radius: 5px;">
-              Créer un signalement
-            </a>
+          <td colspan="6" style="text-align: center; padding: 40px;">
+            📭 Aucun signalement dans le système
           </td>
         </tr>
         <?php endif; ?>
@@ -479,21 +568,28 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </table>
   </div>
 
+  <!-- MODAL POUR LES DÉTAILS -->
   <div class="modal" id="modalDetails">
     <div class="modal-content">
       <div class="modal-header">
         <h2>Détails du Signalement</h2>
         <button class="close-modal" onclick="fermerModal()">&times;</button>
       </div>
-      <div id="contenuDetails"></div>
+      <div id="contenuDetails">
+        <!-- Les détails seront chargés ici -->
+      </div>
+      <div style="text-align: center; margin-top: 20px;">
+        <button class="btn-voir" onclick="fermerModal()">Fermer</button>
+      </div>
     </div>
   </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-
+  <!-- SCRIPT -->
   <script>
+    // Données depuis PHP
     const signalements = <?php echo json_encode($signalements); ?>;
     
+    // FONCTIONS DE FILTRAGE
     function toggleDropdown(id) {
       const menu = document.getElementById(id);
       const allMenus = document.querySelectorAll('.dropdown-menu');
@@ -511,6 +607,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       
       rows.forEach(row => {
         if (row.querySelector('a[href="nouveau-signalement.php"]')) return;
+        
         const text = row.innerText.toLowerCase();
         row.style.display = text.includes(search) ? '' : 'none';
       });
@@ -525,10 +622,10 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         let show = true;
         if (value !== '') {
           if (type === 'cat') {
-            const cat = row.cells[3].innerText;
+            const cat = row.cells[1].innerText; // Titre contient la catégorie
             show = cat.includes(value);
           } else if (type === 'statut') {
-            const statut = row.cells[5].innerText.toLowerCase();
+            const statut = row.cells[4].innerText.toLowerCase();
             show = statut.includes(value.toLowerCase());
           }
         }
@@ -541,6 +638,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       });
     }
     
+    // Fermer les menus en cliquant à l'extérieur
     document.addEventListener('click', function(e) {
       if (!e.target.closest('.dropdown')) {
         document.querySelectorAll('.dropdown-menu').forEach(menu => {
@@ -549,34 +647,39 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       }
     });
     
+    // Fonction pour afficher les détails
     function afficherDetails(id) {
       const signalement = signalements.find(s => s.id == id);
-      if (!signalement) return;
-
-      let statutTexte = '';
-      let statutBg = '';
-      switch(signalement.statut) {
-        case 'en_attente':
-          statutTexte = 'En attente';
-          statutBg = '#fdebd0';
-          break;
-        case 'en_cours':
-          statutTexte = 'En cours';
-          statutBg = '#d6eaf8';
-          break;
-        case 'resolu':
-          statutTexte = 'Résolu';
-          statutBg = '#d5f4e6';
-          break;
+      
+      if (!signalement) {
+        alert("Signalement non trouvé");
+        return;
       }
-
+      
       let html = `
         <div class="detail-item">
           <strong>ID:</strong> #${signalement.id.toString().padStart(3, '0')}
         </div>
         
         <div class="detail-item">
-          <strong>Titre:</strong> ${signalement.titre || ''}
+          <strong>Utilisateur:</strong> ${signalement.nom_complet || 'Anonyme'} (${signalement.email})
+        </div>
+        
+        <div class="detail-item">
+          <strong>Titre:</strong> ${signalement.titre}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Catégorie:</strong> ${signalement.categorie}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Date:</strong> ${new Date(signalement.date_signalement).toLocaleDateString('fr-FR')}
+        </div>
+        
+        <div class="detail-item">
+          <strong>Statut:</strong> ${signalement.statut === 'en_attente' ? 'En attente' : 
+                                   signalement.statut === 'en_cours' ? 'En cours' : 'Résolu'}
         </div>
         
         <div class="detail-item">
@@ -588,24 +691,7 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
         
         <div class="detail-item">
-          <strong>Catégorie:</strong> ${signalement.categorie || ''}
-        </div>
-        
-        <div class="detail-item">
-          <strong>Date:</strong> ${new Date(signalement.date_signalement).toLocaleDateString('fr-FR')}
-        </div>
-        
-        <div class="detail-item">
-          <strong>Statut:</strong> 
-          <span style="display:inline-block; padding:5px 10px; border-radius:15px; background:${statutBg};">${statutTexte}</span>
-        </div>
-        
-        <div class="detail-item">
           <strong>Gravité:</strong> ${signalement.niveau || 'Non spécifiée'}
-        </div>
-        
-        <div class="detail-item">
-          <strong>Signalé par:</strong> ${signalement.nom_complet || 'Anonyme'}
         </div>
         
         <div class="detail-item">
@@ -613,62 +699,59 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
           ${signalement.description || 'Aucune description'}
         </div>
       `;
-
-      // Photos avant/après
-      html += `<div class="photo-container">`;
       
-      // Photo avant
-      html += `<div class="photo-box">`;
-      html += `<h4>📸 Avant</h4>`;
       if (signalement.photo_path) {
-        html += `<img src="${signalement.photo_path}" alt="Photo avant">`;
-      } else {
-        html += `<div class="no-photo"><i class="fas fa-camera"></i><br>Aucune photo avant</div>`;
-      }
-      html += `</div>`;
-      
-      // Photo après
-      html += `<div class="photo-box">`;
-      html += `<h4>✅ Après</h4>`;
-      if (signalement.photo_resolution) {
-        html += `<img src="${signalement.photo_resolution}" alt="Photo après">`;
-        html += `<p style="color:#28a745; margin-top:10px;"><i class="fas fa-check-circle"></i> Résolu</p>`;
-      } else {
-        html += `<div class="no-photo"><i class="fas fa-cloud-upload-alt"></i><br>Pas encore de photo après</div>`;
-      }
-      html += `</div>`;
-      
-      html += `</div>`;
-
-      // Carte
-      if (signalement.latitude && signalement.longitude) {
-        const mapId = 'map_' + signalement.id + '_' + Date.now();
         html += `
           <div class="detail-item">
-            <strong>🗺️ Localisation:</strong>
-            <div id="${mapId}" class="map-container"></div>
+            <strong>Photo:</strong><br>
+            <img src="${signalement.photo_path}" alt="Photo" class="detail-photo">
           </div>
         `;
       }
-
+      
+      if (signalement.latitude && signalement.longitude) {
+        html += `
+          <div class="detail-item">
+            <strong>Localisation sur la carte:</strong>
+            <div class="map-container" id="carteDetails"></div>
+          </div>
+        `;
+      }
+      
       document.getElementById('contenuDetails').innerHTML = html;
       document.getElementById('modalDetails').style.display = 'block';
-
+      
       setTimeout(() => {
         if (signalement.latitude && signalement.longitude) {
-          const mapElements = document.querySelectorAll('[id^="map_"]');
-          if (mapElements.length > 0 && typeof L !== 'undefined') {
-            const mapElement = mapElements[mapElements.length - 1];
-            const map = L.map(mapElement.id).setView([signalement.latitude, signalement.longitude], 16);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-              attribution: '©️ OpenStreetMap'
-            }).addTo(map);
+          if (typeof L !== 'undefined') {
+            const map = L.map('carteDetails').setView([signalement.latitude, signalement.longitude], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
             L.marker([signalement.latitude, signalement.longitude]).addTo(map);
           }
         }
-      }, 200);
+      }, 100);
     }
     
+    // Fonction pour supprimer un signalement
+    function supprimerSignalement(id, titre) {
+      if (confirm(`Voulez-vous vraiment supprimer le signalement : "${titre}" ?`)) {
+        // Envoyer une requête pour supprimer
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '';
+        
+        const inputId = document.createElement('input');
+        inputId.type = 'hidden';
+        inputId.name = 'supprimer_id';
+        inputId.value = id;
+        
+        form.appendChild(inputId);
+        document.body.appendChild(form);
+        form.submit();
+      }
+    }
+    
+    // Fermer le modal
     function fermerModal() {
       document.getElementById('modalDetails').style.display = 'none';
     }
@@ -680,5 +763,9 @@ $signalements = $stmt->fetchAll(PDO::FETCH_ASSOC);
       }
     }
   </script>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+
 </body>
 </html>
