@@ -35,8 +35,12 @@ $total_utilisateurs = count($utilisateurs);
 $admins = array_filter($utilisateurs, function($user) {
     return $user['role'] === 'admin';
 });
+$agents = array_filter($utilisateurs, function($user) {
+    return $user['role'] === 'agent';
+});
 $total_admins = count($admins);
-$total_utilisateurs_normaux = $total_utilisateurs - $total_admins;
+$total_agents = count($agents);
+$total_utilisateurs_normaux = $total_utilisateurs - $total_admins - $total_agents;
 
 // TRAITEMENT DES ACTIONS
 $notification = '';
@@ -48,17 +52,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $user_id = $_POST['user_id'];
         $nouveau_role = $_POST['nouveau_role'];
         
-        // Vérifier que le rôle est valide
-        $roles_valides = ['user', 'admin'];
+        // Vérifier que le rôle est valide (AJOUT DE AGENT)
+        $roles_valides = ['user', 'agent', 'admin'];
         if (!in_array($nouveau_role, $roles_valides)) {
             $notification = "❌ Rôle invalide.";
             $notification_type = "error";
-            // Sortir du traitement
             goto fin_traitement;
         }
         
         // Empêcher l'admin de se retirer ses propres droits
-        if ($user_id == $_SESSION['user_id'] && $nouveau_role == 'user') {
+        if ($user_id == $_SESSION['user_id'] && $nouveau_role != 'admin') {
             $notification = "❌ Vous ne pouvez pas retirer vos propres droits d'administrateur.";
             $notification_type = "error";
         } else {
@@ -66,12 +69,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare("UPDATE utilisateurs SET role = ? WHERE id = ?");
                 $stmt->execute([$nouveau_role, $user_id]);
                 
+                // Si on change un agent, mettre à jour ses missions (optionnel)
+                if ($nouveau_role == 'agent') {
+                    // Vous pouvez ajouter une logique ici si nécessaire
+                }
+                
                 $notification = "✅ Rôle mis à jour avec succès !";
                 $notification_type = "success";
                 
                 // Recharger les données
                 $stmt = $pdo->query($sql);
                 $utilisateurs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                // Recalculer les stats
+                $total_utilisateurs = count($utilisateurs);
+                $admins = array_filter($utilisateurs, function($user) { return $user['role'] === 'admin'; });
+                $agents = array_filter($utilisateurs, function($user) { return $user['role'] === 'agent'; });
+                $total_admins = count($admins);
+                $total_agents = count($agents);
+                $total_utilisateurs_normaux = $total_utilisateurs - $total_admins - $total_agents;
                 
             } catch(PDOException $e) {
                 $notification = "❌ Erreur : " . $e->getMessage();
@@ -94,6 +110,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare("DELETE FROM signalements WHERE user_id = ?");
                 $stmt->execute([$user_id]);
                 
+                // Supprimer aussi les missions assignées si l'utilisateur était agent
+                $stmt = $pdo->prepare("UPDATE signalements SET agent_id = NULL WHERE agent_id = ?");
+                $stmt->execute([$user_id]);
+                
                 // Puis supprimer l'utilisateur
                 $stmt = $pdo->prepare("DELETE FROM utilisateurs WHERE id = ?");
                 $stmt->execute([$user_id]);
@@ -104,6 +124,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Recharger les données
                 $stmt = $pdo->query($sql);
                 $utilisateurs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                // Recalculer les stats
+                $total_utilisateurs = count($utilisateurs);
+                $admins = array_filter($utilisateurs, function($user) { return $user['role'] === 'admin'; });
+                $agents = array_filter($utilisateurs, function($user) { return $user['role'] === 'agent'; });
+                $total_admins = count($admins);
+                $total_agents = count($agents);
+                $total_utilisateurs_normaux = $total_utilisateurs - $total_admins - $total_agents;
                 
             } catch(PDOException $e) {
                 $notification = "❌ Erreur : " . $e->getMessage();
@@ -131,6 +159,7 @@ fin_traitement:
       --success: #28a745;
       --warning: #ffc107;
       --danger: #dc3545;
+      --info: #17a2b8;
       --light: #f8f9fa;
       --dark: #343a40;
       --gray: #6c757d;
@@ -311,6 +340,11 @@ fin_traitement:
       color: #1976d2;
     }
 
+    .role-agent {
+      background-color: #fff3e0;
+      color: #f39c12;
+    }
+
     .role-user {
       background-color: #f3e5f5;
       color: #7b1fa2;
@@ -319,6 +353,7 @@ fin_traitement:
     .action-buttons {
       display: flex;
       gap: 8px;
+      flex-wrap: wrap;
     }
 
     .btn {
@@ -354,6 +389,26 @@ fin_traitement:
       background-color: #c82333;
       transform: translateY(-2px);
       box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
+    }
+
+    .role-select {
+      padding: 8px 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background-color: white;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: var(--transition);
+    }
+
+    .role-select:hover {
+      border-color: var(--primary);
+    }
+
+    .role-select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
     }
 
     .notification {
@@ -405,6 +460,10 @@ fin_traitement:
       table {
         min-width: 700px;
       }
+      
+      .action-buttons {
+        flex-direction: column;
+      }
     }
   </style>
 </head>
@@ -420,7 +479,7 @@ fin_traitement:
   <div class="container">
     <div class="title-section">
       <h1>Gestion des Utilisateurs</h1>
-      <p>Gérez les comptes utilisateurs et leurs permissions</p>
+      <p>Gérez les comptes utilisateurs et leurs permissions (Utilisateur, Agent, Administrateur)</p>
     </div>
 
     <?php if ($notification): ?>
@@ -429,18 +488,22 @@ fin_traitement:
     </div>
     <?php endif; ?>
 
-    <!-- Cartes de statistiques -->
+    <!-- Cartes de statistiques avec AGENT -->
     <div class="stats-cards">
       <div class="stat-card">
         <h3>Total Utilisateurs</h3>
         <div class="number"><?php echo $total_utilisateurs; ?></div>
       </div>
       <div class="stat-card">
-        <h3>Administrateurs</h3>
+        <h3>👑 Administrateurs</h3>
         <div class="number"><?php echo $total_admins; ?></div>
       </div>
       <div class="stat-card">
-        <h3>Utilisateurs Normaux</h3>
+        <h3>🛠️ Agents</h3>
+        <div class="number"><?php echo $total_agents; ?></div>
+      </div>
+      <div class="stat-card">
+        <h3>👤 Utilisateurs</h3>
         <div class="number"><?php echo $total_utilisateurs_normaux; ?></div>
       </div>
     </div>
@@ -466,19 +529,24 @@ fin_traitement:
             <td><?php echo htmlspecialchars($user['email']); ?></td>
             <td>
               <span class="role-badge role-<?php echo $user['role']; ?>">
-                <?php echo $user['role'] === 'admin' ? 'Administrateur' : 'Utilisateur'; ?>
+                <?php 
+                if ($user['role'] === 'admin') echo '👑 Administrateur';
+                elseif ($user['role'] === 'agent') echo '🛠️ Agent';
+                else echo '👤 Utilisateur';
+                ?>
               </span>
             </td>
             <td><?php echo date('d/m/Y', strtotime($user['date_creation'])); ?></td>
             <td>
               <div class="action-buttons">
-                <!-- Formulaire pour changer le rôle -->
+                <!-- Formulaire pour changer le rôle (AVEC AGENT) -->
                 <form method="POST" action="" style="display: inline;" id="formRole<?php echo $user['id']; ?>">
                   <input type="hidden" name="user_id" value="<?php echo $user['id']; ?>">
-                  <select name="nouveau_role" style="padding: 6px; border-radius: 4px; border: 1px solid #ddd;"
-                          onchange="document.getElementById('formRole<?php echo $user['id']; ?>').submit()">
-                    <option value="user" <?php echo $user['role'] === 'user' ? 'selected' : ''; ?>>Utilisateur</option>
-                    <option value="admin" <?php echo $user['role'] === 'admin' ? 'selected' : ''; ?>>Administrateur</option>
+                  <select name="nouveau_role" class="role-select"
+                          onchange="if(confirm('Changer le rôle de cet utilisateur ?')) document.getElementById('formRole<?php echo $user['id']; ?>').submit()">
+                    <option value="user" <?php echo $user['role'] === 'user' ? 'selected' : ''; ?>>👤 Utilisateur</option>
+                    <option value="agent" <?php echo $user['role'] === 'agent' ? 'selected' : ''; ?>>🛠️ Agent</option>
+                    <option value="admin" <?php echo $user['role'] === 'admin' ? 'selected' : ''; ?>>👑 Administrateur</option>
                   </select>
                   <input type="hidden" name="changer_role" value="1">
                 </form>
@@ -492,7 +560,7 @@ fin_traitement:
                   </button>
                 </form>
                 <?php else: ?>
-                <span style="color: var(--gray); font-size: 0.8rem;">(Vous)</span>
+                <span style="color: var(--gray); font-size: 0.8rem;">(Votre compte)</span>
                 <?php endif; ?>
               </div>
             </td>
@@ -524,7 +592,6 @@ fin_traitement:
       }
     }, 5000);
   </script>
-
 
 </body>
 </html>
